@@ -1,0 +1,278 @@
+esphome:
+  name: dashboard
+  on_boot:
+    priority: 1000
+    then:
+      - switch.turn_on: power_switch
+      - delay: 1s
+
+
+
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+   # Tato volba vynutí interní 16MB partition table bez potřeby .csv souboru
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+    sdkconfig_options:
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_MODE_OCT: y
+      CONFIG_SPIRAM_TYPE_AUTO: y
+      CONFIG_ESPTOOLPY_FLASHSIZE_16M: y
+      CONFIG_ESPTOOLPY_FLASHSIZE: "16MB"
+      CONFIG_LOG_COLORS: y
+      CONFIG_ESP_CONSOLE_UART_BAUDRATE: "115200"
+      CONFIG_VFS_SUPPORT_TERMIOS: y  
+
+
+ota:
+logger:
+  hardware_uart: UART0
+  baud_rate: 115200
+#  level: VERY_VERBOSE
+  logs:
+    "esp32": INFO
+    "logger": INFO
+# Toto vypne barvy přímo v ESPHome
+
+
+
+
+wifi:
+   networks:
+      ssid: "Wifi"
+      password: "*********"
+   fast_connect: true    
+    
+   ap:
+       ssid: "dasboard"
+       password: "**********"
+        
+    
+
+# Povolí otevírání AP portálu, pokud se WiFi nepřipojí
+captive_portal:
+
+# --- TADY PŘIDÁTE API A KLÍČ ---
+api:
+  encryption:
+    key: "enter key from Home Assisnat" #
+    
+
+
+
+
+
+
+
+
+
+debug:
+
+#sensor:
+#  - platform: debug
+#    free:
+#      name: "Volna RAM (Internal)"
+#
+#  - platform: template
+#    name: "Volna PSRAM"
+#    lambda: |-
+#      return (float)heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+#    unit_of_measurement: "B"
+#    update_interval: 10s
+#
+#interval:
+#  - interval: 20s
+#    then:
+#      - lambda: |-
+#          ESP_LOGI("psram_check", "Celkova PSRAM: %d bytu", heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+#
+
+switch:
+  - platform: gpio
+    pin: GPIO47
+    name: "Peripheral Power"
+    id: power_switch
+    restore_mode: ALWAYS_ON
+    setup_priority: 1000 
+
+    
+# 2. Sběrnice podle schématu
+i2c:
+  - id: bus_i2c 
+    sda: GPIO42
+    scl: GPIO2
+    scan: true
+    timeout: 100ms
+    frequency: 50kHz  # Zpomalíme pro stabilitu
+    setup_priority: -50
+
+#external_components:
+#  - source: github://Option-Zero/esphome-components
+#    components: [max17048]
+
+
+  
+#sensor:
+#  - platform: homeassistant
+#    id: venkovni_teplota
+#    entity_id: sensor.outdoor_temperature # Změň podle tvého HA
+#    internal: true
+
+#  - platform: sht4x # Lokální senzor na desce
+#    address: 0x44
+#    temperature:
+#      id: lokalni_teplota
+#      name: "ESPink Teplota"
+#    humidity:
+#      name: "ESPink Vlhkost"
+#
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_hodiny
+    size: 60
+    glyphs: '!"%()+=,-./0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ°'
+    
+  - file: "gfonts://Roboto"
+    id: font_text
+    size: 30
+    glyphs: '!"%()+=,-./0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ°'
+    
+  - file: "gfonts://Roboto"
+    id: font_text_maly
+    size: 20
+    glyphs: '!"%()+=,-./0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ°'    
+    
+    
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: "Europe/Prague" # <--- Toto přidá správný posun (včetně letního času) 
+    
+
+
+
+     
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  interface: hardware # Vynutíme HW SPI pro stabilitu
+
+display:
+#  - platform:  waveshare_epaper
+  - platform:  epaper_spi
+    id: muj_displej
+    cs_pin: GPIO10
+    dc_pin: GPIO48
+    reset_pin: GPIO45
+    busy_pin: 
+      number: GPIO38
+      inverted: false
+    model: SSD1677
+    dimensions:
+      width: 800
+      height: 480
+    transform:
+      mirror_x: true
+      mirror_y: false
+    #reset_duration: 200ms
+    full_update_every: 30
+    update_interval: never
+    data_rate: 4Mhz
+    lambda: |-
+      it.fill(Color::WHITE); 
+
+      int stred_x = it.get_width() / 2;
+      //it.fill(Color::WHITE);
+      
+      if (id(ha_time).now().is_valid() && id(teplota_obyvak).has_state()) {
+        it.strftime(stred_x, 80, id(font_hodiny), Color::BLACK, TextAlign::TOP_CENTER, "%H:%M", id(ha_time).now());
+        it.printf(stred_x, 250, id(font_text), Color::BLACK, TextAlign::TOP_CENTER, "Teplota: %.1f °C", id(teplota_obyvak).state);
+        it.printf(780, 460, id(font_text), Color::BLACK, TextAlign::BOTTOM_RIGHT, "Bat: %.2f V", id(napeti_bat_id).state);
+      }      
+
+
+
+sensor:
+  - platform: adc
+    pin: GPIO9
+    id: napeti_bat_id # ID je nutné pro propojení se senzorem níže
+    name: "Napětí baterie"
+    update_interval: 0.5s
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 2
+    attenuation: 12db
+    filters:
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 1
+      - multiply: 1.769388
+
+
+  - platform: homeassistant
+    id: teplota_obyvak
+    entity_id: sensor.tz3000_isw9u95y_ts0201_teplota
+    on_value:
+      then:
+        - component.update: muj_displej # Ručně vyvolá překreslení
+        - delay: 5s # Čas pro displej, aby fyzicky dokončil update
+        - deep_sleep.enter: deep_sleep_control
+
+
+
+  - platform: sht4x # Lokální senzor na desce
+    address: 0x44
+    update_interval: 60s
+    setup_priority: -100
+    temperature:
+      id: lokalni_teplota
+      name: "ESPink Teplota"
+    humidity:
+      name: "ESPink Vlhkost"
+
+
+
+
+
+
+
+
+
+
+
+
+
+binary_sensor:
+  - platform: template
+    name: "Slabá baterie"
+    device_class: battery # V Home Assistantu se zobrazí jako ikona baterie
+    lambda: |-
+      // Příklad: 3.3V jako kritická mez pro Li-ion/Li-Pol
+      if (id(napeti_bat_id).state < 3.3) {
+        return true;  // Problém / Slabá baterie
+      } else {
+        return false; // Baterie je OK
+      }
+    filters:
+        - delayed_on: 2s
+        
+                    
+        
+        
+        
+deep_sleep:
+  id: deep_sleep_control
+  # ESP se probudí každých 10 minut
+  #run_duration: 6s        # Dejte mu 20s, aby stihl Wi-Fi, čas i displej
+  sleep_duration: 45s      # Spát bude 1 minutu
+  
+
+
+        
